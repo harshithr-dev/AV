@@ -10,11 +10,7 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
             --bg: #0a0a0f;
@@ -100,20 +96,34 @@
 
         .loader-progress {
             margin-top: 20px;
-            width: 200px;
-            height: 2px;
+            width: 280px;
+            height: 3px;
             background: rgba(255,255,255,0.05);
-            border-radius: 1px;
+            border-radius: 2px;
             overflow: hidden;
         }
 
         .loader-progress-bar {
             height: 100%;
             width: 0%;
-            background: var(--accent);
-            border-radius: 1px;
-            transition: width 0.3s ease;
+            background: linear-gradient(90deg, var(--accent), #7b2ff7);
+            border-radius: 2px;
+            transition: width 0.5s ease;
         }
+
+        .loader-debug {
+            margin-top: 16px;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-family: 'Space Grotesk', monospace;
+            text-align: center;
+            line-height: 1.6;
+            max-width: 400px;
+        }
+
+        .loader-debug .status-ok { color: var(--accent); }
+        .loader-debug .status-wait { color: #f39c12; }
+        .loader-debug .status-err { color: var(--danger); }
 
         /* Start Screen */
         #start-screen {
@@ -220,6 +230,12 @@
 
         .start-btn:active {
             transform: translateY(0);
+        }
+
+        .start-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
         }
 
         .start-hint {
@@ -628,42 +644,6 @@
             background: rgba(255,255,255,0.1);
             border-radius: 2px;
         }
-
-        /* Detection boxes on overlay */
-        .det-box {
-            position: absolute;
-            border: 2px solid;
-            border-radius: 8px;
-            pointer-events: auto;
-            cursor: pointer;
-            transition: opacity 0.2s;
-        }
-
-        .det-box:hover {
-            opacity: 0.8;
-        }
-
-        .det-label {
-            position: absolute;
-            top: -28px;
-            left: 0;
-            padding: 4px 10px;
-            border-radius: 6px;
-            font-size: 0.7rem;
-            font-weight: 600;
-            white-space: nowrap;
-            backdrop-filter: blur(10px);
-        }
-
-        .det-center {
-            position: absolute;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #fff;
-            transform: translate(-50%, -50%);
-            box-shadow: 0 0 10px rgba(255,255,255,0.5);
-        }
     </style>
 </head>
 <body>
@@ -671,10 +651,13 @@
     <!-- Loading -->
     <div id="loading-screen">
         <div class="loader-ring"></div>
-        <div class="loader-text">Initializing Neural Network</div>
-        <div class="loader-sub">Loading COCO-SSD model (~20MB)</div>
+        <div class="loader-text" id="load-title">Loading Dependencies</div>
+        <div class="loader-sub" id="load-sub">Preparing TensorFlow.js runtime</div>
         <div class="loader-progress">
             <div class="loader-progress-bar" id="load-bar"></div>
+        </div>
+        <div class="loader-debug" id="load-debug">
+            <span class="status-wait">Waiting for scripts...</span>
         </div>
     </div>
 
@@ -686,7 +669,7 @@
             </div>
             <h1 class="start-title">Ambient Lens</h1>
             <p class="start-desc">Point your camera around the room. Colors and objects synthesize a unique ambient soundscape in real time.</p>
-            <button class="start-btn" id="start-btn">Enter Experience</button>
+            <button class="start-btn" id="start-btn" disabled>Loading...</button>
             <div class="start-hint">
                 <span></span>
                 Requires camera access & audio playback
@@ -773,6 +756,22 @@
     </div>
 
     <script>
+        // ============================================
+        // LOADING & DEBUG UTILS
+        // ============================================
+        const loadBar = document.getElementById('load-bar');
+        const loadTitle = document.getElementById('load-title');
+        const loadSub = document.getElementById('load-sub');
+        const loadDebug = document.getElementById('load-debug');
+        const startBtn = document.getElementById('start-btn');
+
+        function setLoad(pct, title, sub, debugHtml) {
+            loadBar.style.width = pct + '%';
+            if (title) loadTitle.textContent = title;
+            if (sub) loadSub.textContent = sub;
+            if (debugHtml) loadDebug.innerHTML = debugHtml;
+        }
+
         // ============================================
         // AUDIO ENGINE
         // ============================================
@@ -969,7 +968,6 @@
                 ctx.fillStyle = 'rgba(10, 10, 15, 0.12)';
                 ctx.fillRect(0, 0, w, h);
 
-                // Color auras
                 this.colorPalette.forEach((color, i) => {
                     const x = w * (0.2 + (i / Math.max(this.colorPalette.length, 1)) * 0.6);
                     const y = h * 0.5;
@@ -981,7 +979,6 @@
                     ctx.fillRect(0, 0, w, h);
                 });
 
-                // Waves
                 const time = Date.now() * 0.001;
                 for (let i = 0; i < 3; i++) {
                     ctx.beginPath();
@@ -996,7 +993,6 @@
                     ctx.stroke();
                 }
 
-                // Particles
                 this.particles.forEach(p => {
                     p.x += p.vx * (1 + this.audioData.beat * 0.008);
                     p.y += p.vy * (1 + this.audioData.mod * 0.008);
@@ -1011,7 +1007,6 @@
                     ctx.fill();
                 });
 
-                // Object orbs
                 this.objects.forEach((obj, i) => {
                     const x = obj.x * w, y = obj.y * h;
                     const size = 24 + (obj.score * 60) + (this.audioData.beat * 0.25);
@@ -1048,7 +1043,7 @@
                 this.isRunning = false;
             }
 
-            async loadModel(onProgress) {
+            async loadModel() {
                 this.model = await cocoSsd.load({ base: 'mobilenet_v2' });
                 return this.model;
             }
@@ -1200,6 +1195,7 @@
                 this.fps = 0; this.lastFrame = 0; this.frameCount = 0;
                 this.recording = false;
                 this.setupUI();
+                this.checkScripts();
             }
 
             setupUI() {
@@ -1210,17 +1206,44 @@
                 document.getElementById('overlay').addEventListener('click', (e) => this.handleTap(e));
             }
 
+            checkScripts() {
+                const check = () => {
+                    const tfOk = typeof tf !== 'undefined';
+                    const cocoOk = typeof cocoSsd !== 'undefined';
+                    const toneOk = typeof Tone !== 'undefined';
+                    
+                    if (tfOk && cocoOk && toneOk) {
+                        setLoad(100, 'Ready', 'Click the button below to begin', 
+                            '<span class="status-ok">✓ TensorFlow.js loaded</span><br><span class="status-ok">✓ COCO-SSD loaded</span><br><span class="status-ok">✓ Tone.js loaded</span>');
+                        startBtn.disabled = false;
+                        startBtn.textContent = 'Enter Experience';
+                    } else {
+                        const missing = [];
+                        if (!tfOk) missing.push('TensorFlow.js');
+                        if (!cocoOk) missing.push('COCO-SSD');
+                        if (!toneOk) missing.push('Tone.js');
+                        setLoad(30, 'Loading Dependencies', `Waiting for: ${missing.join(', ')}`,
+                            `${tfOk ? '<span class="status-ok">✓</span>' : '<span class="status-wait">○</span>'} TensorFlow.js<br>` +
+                            `${cocoOk ? '<span class="status-ok">✓</span>' : '<span class="status-wait">○</span>'} COCO-SSD<br>` +
+                            `${toneOk ? '<span class="status-ok">✓</span>' : '<span class="status-wait">○</span>'} Tone.js`);
+                        setTimeout(check, 500);
+                    }
+                };
+                check();
+            }
+
             async start() {
-                const bar = document.getElementById('load-bar');
-                bar.style.width = '30%';
+                setLoad(50, 'Loading AI Model', 'Downloading COCO-SSD MobileNet (~20MB)...', '<span class="status-wait">Loading neural network...</span>');
                 
                 try {
                     await this.detector.loadModel();
-                    bar.style.width = '70%';
+                    setLoad(75, 'Starting Camera', 'Requesting webcam access...', '<span class="status-ok">✓ Model loaded</span><br><span class="status-wait">○ Camera access...</span>');
+                    
                     await this.detector.start();
-                    bar.style.width = '90%';
+                    setLoad(90, 'Initializing Audio', 'Preparing synthesizers...', '<span class="status-ok">✓ Camera active</span><br><span class="status-wait">○ Audio engine...</span>');
+                    
                     await this.audio.init();
-                    bar.style.width = '100%';
+                    setLoad(100, 'Ready', 'Launching...', '<span class="status-ok">✓ All systems go</span>');
                     
                     this.analyzer = new SceneAnalyzer();
                     
@@ -1231,14 +1254,16 @@
                         setTimeout(() => {
                             document.getElementById('tap-hint').style.display = 'block';
                         }, 1500);
-                    }, 500);
+                    }, 600);
                     
                     this.isRunning = true;
                     this.loop();
                     
                 } catch (err) {
                     console.error(err);
-                    alert('Error: ' + err.message + '\n\nPlease allow camera access and use a modern browser.');
+                    setLoad(0, 'Error', err.message, `<span class="status-err">✗ ${err.message}</span><br><br>Make sure you're on HTTPS and have granted camera permissions.`);
+                    startBtn.disabled = false;
+                    startBtn.textContent = 'Retry';
                 }
             }
 
