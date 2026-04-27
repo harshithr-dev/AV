@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ambient Lens — Audio Visualizer</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #0a0a0f;
+            --surface: rgba(255,255,255,0.03);
+            --surface-hover: rgba(255,255,255,0.06);
+            --border: rgba(255,255,255,0.08);
+            --text: #e8e8ec;
+            --text-muted: #6b6b7b;
+            --accent: #00d4aa;
+            --accent-dim: rgba(0,212,170,0.15);
+            --danger: #ff4757;
+            --glass: rgba(10,10,15,0.85);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Loading */
+        #loading-screen {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+            z-index: 1000;
+            transition: opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        #loading-screen.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loader-ring {
+            width: 64px;
+            height: 64px;
+            position: relative;
+        }
+
+        .loader-ring::before,
+        .loader-ring::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 2px solid transparent;
+        }
+
+        .loader-ring::before {
+            border-top-color: var(--accent);
+            animation: spin 1s linear infinite;
+        }
+
+        .loader-ring::after {
+            border: 2px solid rgba(255,255,255,0.05);
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loader-text {
+            margin-top: 24px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.1rem;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+        }
+
+        .loader-sub {
+            margin-top: 8px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .loader-progress {
+            margin-top: 20px;
+            width: 200px;
+            height: 2px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 1px;
+            overflow: hidden;
+        }
+
+        .loader-progress-bar {
+            height: 100%;
+            width: 0%;
+            background: var(--accent);
+            border-radius: 1px;
+            transition: width 0.3s ease;
+        }
+
+        /* Start Screen */
+        #start-screen {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+            z-index: 999;
+            transition: opacity 1s cubic-bezier(0.4, 0, 0.2, 1), visibility 1s;
+        }
+
+        #start-screen.hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .start-content {
+            text-align: center;
+            max-width: 480px;
+            padding: 40px;
+            position: relative;
+        }
+
+        .logo-mark {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 32px;
+            position: relative;
+        }
+
+        .logo-mark::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 24px;
+            background: linear-gradient(135deg, var(--accent), #7b2ff7);
+            opacity: 0.2;
+            filter: blur(20px);
+        }
+
+        .logo-mark-inner {
+            position: absolute;
+            inset: 0;
+            border-radius: 20px;
+            background: linear-gradient(135deg, var(--accent), #7b2ff7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+        }
+
+        .start-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 700;
+            line-height: 1.1;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #fff 0%, #888 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .start-desc {
+            font-size: 1rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+            margin-bottom: 40px;
+        }
+
+        .start-btn {
+            padding: 16px 48px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 14px;
+            background: linear-gradient(135deg, var(--accent), #00a884);
+            color: #000;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .start-btn::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, transparent, rgba(255,255,255,0.2));
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .start-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 20px 60px rgba(0,212,170,0.3);
+        }
+
+        .start-btn:hover::before {
+            opacity: 1;
+        }
+
+        .start-btn:active {
+            transform: translateY(0);
+        }
+
+        .start-hint {
+            margin-top: 24px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .start-hint span {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            background: var(--accent);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* App */
+        #app {
+            position: fixed;
+            inset: 0;
+            opacity: 0;
+            transition: opacity 1s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        #app.active {
+            opacity: 1;
+        }
+
+        #webcam {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #visualizer {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #overlay {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        /* UI Layer */
+        #ui {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        #ui > * {
+            pointer-events: auto;
+        }
+
+        /* Top Bar */
+        .top-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--glass);
+            backdrop-filter: blur(20px) saturate(1.8);
+            -webkit-backdrop-filter: blur(20px) saturate(1.8);
+            padding: 12px 20px;
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--accent), #7b2ff7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+        }
+
+        .brand-text {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            background: var(--surface);
+            padding: 6px 14px;
+            border-radius: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent);
+            box-shadow: 0 0 8px var(--accent);
+            animation: pulse 2s infinite;
+        }
+
+        /* Side Panel */
+        .side-panel {
+            position: absolute;
+            top: 80px;
+            left: 20px;
+            width: 260px;
+            background: var(--glass);
+            backdrop-filter: blur(20px) saturate(1.8);
+            -webkit-backdrop-filter: blur(20px) saturate(1.8);
+            border-radius: 16px;
+            border: 1px solid var(--border);
+            padding: 20px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+            max-height: calc(100vh - 120px);
+            overflow-y: auto;
+        }
+
+        .panel-section {
+            margin-bottom: 24px;
+        }
+
+        .panel-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .panel-label {
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        /* Color Palette */
+        .palette {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .color-swatch {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            border: 2px solid rgba(255,255,255,0.1);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+
+        .color-swatch:hover {
+            transform: scale(1.15);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+
+        /* Objects List */
+        .obj-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .obj-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            background: var(--surface);
+            border-radius: 12px;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .obj-item:hover {
+            background: var(--surface-hover);
+            border-color: var(--border);
+        }
+
+        .obj-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            background: var(--accent-dim);
+        }
+
+        .obj-info {
+            flex: 1;
+        }
+
+        .obj-name {
+            font-size: 0.85rem;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .obj-meta {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .obj-confidence {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        /* Audio Meters */
+        .meter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .meter {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .meter-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .meter-name {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .meter-value {
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--accent);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .meter-track {
+            height: 4px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .meter-fill {
+            height: 100%;
+            border-radius: 2px;
+            background: linear-gradient(90deg, var(--accent), #7b2ff7);
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            width: 0%;
+            box-shadow: 0 0 10px rgba(0,212,170,0.3);
+        }
+
+        /* Bottom Controls */
+        .bottom-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .ctrl-btn {
+            width: 48px;
+            height: 48px;
+            border-radius: 14px;
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-size: 1.2rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+        }
+
+        .ctrl-btn:hover {
+            background: var(--surface-hover);
+            transform: translateY(-2px);
+        }
+
+        .ctrl-btn:active {
+            transform: translateY(0);
+        }
+
+        .ctrl-btn.danger {
+            color: var(--danger);
+        }
+
+        .ctrl-btn.recording {
+            animation: recordPulse 1.5s infinite;
+            color: var(--danger);
+        }
+
+        @keyframes recordPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(255,71,87,0.4); }
+            50% { box-shadow: 0 0 0 12px rgba(255,71,87,0); }
+        }
+
+        .ctrl-btn.primary {
+            width: auto;
+            padding: 0 24px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, var(--accent), #00a884);
+            color: #000;
+            border: none;
+        }
+
+        /* Tap Hint */
+        #tap-hint {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            padding: 16px 28px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            font-size: 0.9rem;
+            pointer-events: none;
+            opacity: 0;
+            animation: hintInOut 5s forwards;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            z-index: 100;
+        }
+
+        @keyframes hintInOut {
+            0% { opacity: 0; transform: translate(-50%, -40%); }
+            15% { opacity: 1; transform: translate(-50%, -50%); }
+            85% { opacity: 1; transform: translate(-50%, -50%); }
+            100% { opacity: 0; transform: translate(-50%, -60%); }
+        }
+
+        /* Ripple Effect */
+        .ripple {
+            position: fixed;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(0,212,170,0.4) 0%, transparent 70%);
+            pointer-events: none;
+            animation: rippleExpand 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+            z-index: 50;
+        }
+
+        @keyframes rippleExpand {
+            0% { width: 0; height: 0; opacity: 1; }
+            100% { width: 300px; height: 300px; opacity: 0; }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.1);
+            border-radius: 2px;
+        }
+
+        /* Detection boxes on overlay */
+        .det-box {
+            position: absolute;
+            border: 2px solid;
+            border-radius: 8px;
+            pointer-events: auto;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .det-box:hover {
+            opacity: 0.8;
+        }
+
+        .det-label {
+            position: absolute;
+            top: -28px;
+            left: 0;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            white-space: nowrap;
+            backdrop-filter: blur(10px);
+        }
+
+        .det-center {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #fff;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px rgba(255,255,255,0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Loading -->
+    <div id="loading-screen">
+        <div class="loader-ring"></div>
+        <div class="loader-text">Initializing Neural Network</div>
+        <div class="loader-sub">Loading COCO-SSD model (~20MB)</div>
+        <div class="loader-progress">
+            <div class="loader-progress-bar" id="load-bar"></div>
+        </div>
+    </div>
+
+    <!-- Start Screen -->
+    <div id="start-screen">
+        <div class="start-content">
+            <div class="logo-mark">
+                <div class="logo-mark-inner">◉</div>
+            </div>
+            <h1 class="start-title">Ambient Lens</h1>
+            <p class="start-desc">Point your camera around the room. Colors and objects synthesize a unique ambient soundscape in real time.</p>
+            <button class="start-btn" id="start-btn">Enter Experience</button>
+            <div class="start-hint">
+                <span></span>
+                Requires camera access & audio playback
+            </div>
+        </div>
+    </div>
+
+    <!-- App -->
+    <div id="app">
+        <video id="webcam" autoplay playsinline muted></video>
+        <canvas id="visualizer"></canvas>
+        <canvas id="overlay"></canvas>
+
+        <div id="ui">
+            <div class="top-bar">
+                <div class="brand">
+                    <div class="brand-icon">◉</div>
+                    <div class="brand-text">Ambient Lens</div>
+                </div>
+                <div class="status-pill">
+                    <div class="status-dot"></div>
+                    <span id="fps-display">0 FPS</span>
+                    <span style="color: var(--border)">|</span>
+                    <span id="obj-count">0 objects</span>
+                </div>
+            </div>
+
+            <div class="side-panel">
+                <div class="panel-section">
+                    <div class="panel-label">Dominant Colors</div>
+                    <div class="palette" id="palette"></div>
+                </div>
+
+                <div class="panel-section">
+                    <div class="panel-label">Detected Objects</div>
+                    <div class="obj-list" id="obj-list"></div>
+                </div>
+
+                <div class="panel-section">
+                    <div class="panel-label">Audio Parameters</div>
+                    <div class="meter-group">
+                        <div class="meter">
+                            <div class="meter-header">
+                                <span class="meter-name">Drone Frequency</span>
+                                <span class="meter-value" id="drone-val">0%</span>
+                            </div>
+                            <div class="meter-track">
+                                <div class="meter-fill" id="drone-bar"></div>
+                            </div>
+                        </div>
+                        <div class="meter">
+                            <div class="meter-header">
+                                <span class="meter-name">Rhythm Density</span>
+                                <span class="meter-value" id="beat-val">0%</span>
+                            </div>
+                            <div class="meter-track">
+                                <div class="meter-fill" id="beat-bar"></div>
+                            </div>
+                        </div>
+                        <div class="meter">
+                            <div class="meter-header">
+                                <span class="meter-name">Modulation Depth</span>
+                                <span class="meter-value" id="mod-val">0%</span>
+                            </div>
+                            <div class="meter-track">
+                                <div class="meter-fill" id="mod-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bottom-bar">
+                <div></div>
+                <div class="controls">
+                    <button class="ctrl-btn" id="mute-btn" title="Toggle Audio">🔊</button>
+                    <button class="ctrl-btn" id="record-btn" title="Record Audio">⏺</button>
+                    <button class="ctrl-btn" id="fullscreen-btn" title="Fullscreen">⛶</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="tap-hint" style="display:none">Tap any detected object to trigger its sound</div>
+    </div>
+
+    <script>
+        // ============================================
+        // AUDIO ENGINE
+        // ============================================
+        class AudioEngine {
+            constructor() {
+                this.initialized = false;
+                this.isMuted = false;
+                this.droneFreq = 110;
+                this.beatRate = 2;
+                this.modDepth = 0.5;
+                this.currentChord = ['C2','G2','C3','E3'];
+                this.recorder = null;
+            }
+
+            async init() {
+                await Tone.start();
+                
+                this.reverb = new Tone.Reverb({ decay: 8, wet: 0.4 }).toDestination();
+                this.delay = new Tone.FeedbackDelay({ delayTime: '8n', feedback: 0.3, wet: 0.2 }).connect(this.reverb);
+                this.filter = new Tone.Filter(800, 'lowpass').connect(this.delay);
+                
+                this.droneSynth = new Tone.PolySynth(Tone.FMSynth, {
+                    harmonicity: 2, modulationIndex: 3,
+                    oscillator: { type: 'sine' },
+                    envelope: { attack: 2, decay: 1, sustain: 1, release: 4 },
+                    modulation: { type: 'triangle' },
+                    modulationEnvelope: { attack: 1, decay: 0.5, sustain: 1, release: 2 }
+                }).connect(this.filter);
+                this.droneSynth.volume.value = -12;
+                
+                this.beatSynth = new Tone.MembraneSynth({
+                    pitchDecay: 0.05, octaves: 4,
+                    oscillator: { type: 'sine' },
+                    envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 1.4 }
+                }).connect(this.delay);
+                this.beatSynth.volume.value = -15;
+                
+                this.modSynth = new Tone.AMSynth({
+                    harmonicity: 3, detune: 0,
+                    oscillator: { type: 'sine' },
+                    envelope: { attack: 1, decay: 0.5, sustain: 1, release: 3 },
+                    modulation: { type: 'square' },
+                    modulationEnvelope: { attack: 0.5, decay: 0, sustain: 1, release: 0.5 }
+                }).connect(this.filter);
+                this.modSynth.volume.value = -20;
+                
+                this.droneSynth.triggerAttack(this.currentChord);
+                
+                this.beatLoop = new Tone.Loop((time) => {
+                    if (Math.random() > 0.3) this.beatSynth.triggerAttackRelease('C1', '8n', time);
+                    if (Math.random() > 0.6) this.beatSynth.triggerAttackRelease('G1', '8n', time + 0.25);
+                }, '2n').start(0);
+                
+                Tone.Transport.bpm.value = 60;
+                Tone.Transport.start();
+                
+                this.initialized = true;
+            }
+
+            updateFromScene(sceneData) {
+                if (!this.initialized || this.isMuted) return;
+                
+                const { dominantColor, brightness, objects } = sceneData;
+                const hue = dominantColor ? dominantColor.h : 0;
+                const baseFreq = 110 * Math.pow(2, Math.floor((hue / 360) * 7) / 12);
+                
+                this.droneFreq = this.droneFreq * 0.95 + baseFreq * 0.05;
+                this.filter.frequency.rampTo(200 + brightness * 3000, 0.5);
+                
+                const objCount = objects.length;
+                this.beatRate = this.beatRate * 0.9 + (1 + objCount * 0.5) * 0.1;
+                Tone.Transport.bpm.rampTo(40 + this.beatRate * 20, 1);
+                
+                this.modDepth = dominantColor ? dominantColor.s : 0.5;
+                
+                this.updateChord(hue);
+                
+                if (Math.random() < 0.02) {
+                    this.modSynth.triggerAttackRelease(Tone.Frequency(this.droneFreq * 2).toNote(), '4n');
+                }
+            }
+
+            updateChord(hue) {
+                const roots = ['C','D','E','F','G','A','B'];
+                const root = roots[Math.floor((hue / 360) * 7) % 7];
+                const chords = {
+                    'C': ['C2','G2','C3','E3'], 'D': ['D2','A2','D3','F#3'],
+                    'E': ['E2','B2','E3','G#3'], 'F': ['F2','C3','F3','A3'],
+                    'G': ['G2','D3','G3','B3'], 'A': ['A2','E3','A3','C#3'],
+                    'B': ['B2','F#3','B3','D#3']
+                };
+                const newChord = chords[root];
+                if (JSON.stringify(newChord) !== JSON.stringify(this.currentChord)) {
+                    this.droneSynth.releaseAll();
+                    this.currentChord = newChord;
+                    this.droneSynth.triggerAttack(this.currentChord);
+                }
+            }
+
+            triggerObjectSound(objectClass, x) {
+                if (!this.initialized || this.isMuted) return;
+                
+                const sounds = {
+                    'person': 'C4', 'chair': 'E3', 'book': 'G3', 'bottle': 'B3',
+                    'cup': 'D4', 'laptop': 'A3', 'cell phone': 'F#4', 'tv': 'C3',
+                    'couch': 'G2', 'potted plant': 'E4', 'bed': 'A2', 'dining table': 'D3',
+                    'refrigerator': 'C2', 'microwave': 'F4', 'sink': 'B2', 'clock': 'G4'
+                };
+                
+                const note = sounds[objectClass] || 'C3';
+                const synth = new Tone.Synth({
+                    oscillator: { type: 'triangle' },
+                    envelope: { attack: 0.02, decay: 0.3, sustain: 0.1, release: 1 }
+                }).connect(this.reverb);
+                
+                const panner = new Tone.Panner((x - 0.5) * 2).connect(Tone.Destination);
+                synth.disconnect();
+                synth.connect(panner);
+                synth.triggerAttackRelease(note, '8n');
+                
+                setTimeout(() => { synth.dispose(); panner.dispose(); }, 3000);
+            }
+
+            toggleMute() {
+                this.isMuted = !this.isMuted;
+                Tone.Destination.mute = this.isMuted;
+                return this.isMuted;
+            }
+
+            startRecording() {
+                this.recorder = new Tone.Recorder();
+                Tone.Destination.connect(this.recorder);
+                this.recorder.start();
+            }
+
+            async stopRecording() {
+                if (!this.recorder) return null;
+                const blob = await this.recorder.stop();
+                this.recorder.dispose();
+                this.recorder = null;
+                return blob;
+            }
+
+            getAudioParams() {
+                return {
+                    drone: Math.min(100, (this.droneFreq / 440) * 50),
+                    beat: Math.min(100, this.beatRate * 25),
+                    mod: Math.min(100, this.modDepth * 100)
+                };
+            }
+        }
+
+        // ============================================
+        // VISUAL ENGINE
+        // ============================================
+        class VisualEngine {
+            constructor() {
+                this.canvas = document.getElementById('visualizer');
+                this.ctx = this.canvas.getContext('2d');
+                this.resize();
+                this.particles = Array.from({length: 150}, () => this.createParticle());
+                this.colorPalette = [];
+                this.objects = [];
+                this.audioData = { drone: 0, beat: 0, mod: 0 };
+                window.addEventListener('resize', () => this.resize());
+                this.animate();
+            }
+
+            resize() {
+                this.canvas.width = window.innerWidth;
+                this.canvas.height = window.innerHeight;
+            }
+
+            createParticle() {
+                return {
+                    x: Math.random() * this.canvas.width,
+                    y: Math.random() * this.canvas.height,
+                    vx: (Math.random() - 0.5) * 1.5,
+                    vy: (Math.random() - 0.5) * 1.5,
+                    size: Math.random() * 3 + 0.5,
+                    life: Math.random(),
+                    color: `hsl(${Math.random() * 360}, 70%, 60%)`
+                };
+            }
+
+            updateScene(colors, objects, audioParams) {
+                this.colorPalette = colors;
+                this.objects = objects;
+                this.audioData = audioParams;
+            }
+
+            animate() {
+                const ctx = this.ctx, w = this.canvas.width, h = this.canvas.height;
+                ctx.fillStyle = 'rgba(10, 10, 15, 0.12)';
+                ctx.fillRect(0, 0, w, h);
+
+                // Color auras
+                this.colorPalette.forEach((color, i) => {
+                    const x = w * (0.2 + (i / Math.max(this.colorPalette.length, 1)) * 0.6);
+                    const y = h * 0.5;
+                    const radius = 120 + (this.audioData.drone * 2.5);
+                    const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
+                    grad.addColorStop(0, `hsla(${color.h}, ${color.s*100}%, ${color.l*50}%, 0.25)`);
+                    grad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = grad;
+                    ctx.fillRect(0, 0, w, h);
+                });
+
+                // Waves
+                const time = Date.now() * 0.001;
+                for (let i = 0; i < 3; i++) {
+                    ctx.beginPath();
+                    for (let x = 0; x < w; x += 4) {
+                        const freq = 0.008 + (i * 0.004) + (this.audioData.drone * 0.00008);
+                        const amp = 40 + (this.audioData.mod * 0.6) + (i * 25);
+                        const y = h * 0.65 + Math.sin(x * freq + time * (1 + i * 0.5) + this.audioData.beat * 0.08) * amp;
+                        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                    }
+                    ctx.strokeStyle = `hsla(${160 + i * 30}, 70%, 55%, ${0.15 - i * 0.04})`;
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+
+                // Particles
+                this.particles.forEach(p => {
+                    p.x += p.vx * (1 + this.audioData.beat * 0.008);
+                    p.y += p.vy * (1 + this.audioData.mod * 0.008);
+                    p.life -= 0.004;
+                    if (p.life <= 0 || p.x < 0 || p.x > w || p.y < 0 || p.y > h) {
+                        Object.assign(p, this.createParticle());
+                        p.life = 1;
+                    }
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size * (1 + this.audioData.drone * 0.004), 0, Math.PI * 2);
+                    ctx.fillStyle = p.color.replace(')', `, ${p.life * 0.6})`).replace('hsl', 'hsla');
+                    ctx.fill();
+                });
+
+                // Object orbs
+                this.objects.forEach((obj, i) => {
+                    const x = obj.x * w, y = obj.y * h;
+                    const size = 24 + (obj.score * 60) + (this.audioData.beat * 0.25);
+                    const pulse = Math.sin(Date.now() * 0.003 + i) * 0.3 + 0.7;
+                    
+                    const grad = ctx.createRadialGradient(x, y, 0, x, y, size * 2.5);
+                    grad.addColorStop(0, `rgba(0, 212, 170, ${0.2 * pulse})`);
+                    grad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = grad;
+                    ctx.beginPath();
+                    ctx.arc(x, y, size * 2.5, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.beginPath();
+                    ctx.arc(x, y, size * 0.25, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(0, 212, 170, ${0.8 * pulse})`;
+                    ctx.fill();
+                });
+
+                requestAnimationFrame(() => this.animate());
+            }
+        }
+
+        // ============================================
+        // OBJECT DETECTOR
+        // ============================================
+        class ObjectDetector {
+            constructor() {
+                this.video = document.getElementById('webcam');
+                this.overlay = document.getElementById('overlay');
+                this.ctx = this.overlay.getContext('2d');
+                this.model = null;
+                this.detections = [];
+                this.isRunning = false;
+            }
+
+            async loadModel(onProgress) {
+                this.model = await cocoSsd.load({ base: 'mobilenet_v2' });
+                return this.model;
+            }
+
+            async start() {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' },
+                    audio: false
+                });
+                this.video.srcObject = stream;
+                await new Promise(r => { this.video.onloadedmetadata = () => { this.video.play(); r(); }; });
+                this.isRunning = true;
+                this.detect();
+            }
+
+            async detect() {
+                if (!this.isRunning) return;
+                if (this.model && this.video.readyState === 4) {
+                    this.detections = await this.model.detect(this.video);
+                    this.drawDetections();
+                }
+                requestAnimationFrame(() => this.detect());
+            }
+
+            drawDetections() {
+                const ctx = this.ctx;
+                const w = this.overlay.width = window.innerWidth;
+                const h = this.overlay.height = window.innerHeight;
+                ctx.clearRect(0, 0, w, h);
+                
+                const sx = w / this.video.videoWidth;
+                const sy = h / this.video.videoHeight;
+
+                this.detections.forEach(det => {
+                    const [x, y, bw, bh] = det.bbox;
+                    const sx1 = x * sx, sy1 = y * sy, sw = bw * sx, sh = bh * sy;
+                    const hue = this.getClassHue(det.class);
+                    
+                    ctx.strokeStyle = `hsla(${hue}, 80%, 60%, 0.8)`;
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(sx1, sy1, sw, sh);
+                    
+                    ctx.fillStyle = `hsla(${hue}, 80%, 60%, 0.9)`;
+                    ctx.font = '600 12px Inter';
+                    const text = `${det.class} ${Math.round(det.score * 100)}%`;
+                    const tw = ctx.measureText(text).width;
+                    ctx.fillRect(sx1, sy1 - 26, tw + 16, 24);
+                    
+                    ctx.fillStyle = '#000';
+                    ctx.fillText(text, sx1 + 8, sy1 - 8);
+                    
+                    ctx.beginPath();
+                    ctx.arc(sx1 + sw/2, sy1 + sh/2, 4, 0, Math.PI * 2);
+                    ctx.fillStyle = '#fff';
+                    ctx.fill();
+                });
+            }
+
+            getClassHue(name) {
+                const map = { person:200, chair:30, book:60, bottle:180, cup:300, laptop:120, 'cell phone':140, tv:160, couch:20, 'potted plant':100, bed:10, 'dining table':40, refrigerator:220, microwave:240, sink:200, clock:280 };
+                return map[name] || Math.abs(name.split('').reduce((a,b)=>a+b.charCodeAt(0),0))%360;
+            }
+
+            getDetections() {
+                return this.detections.map(d => ({
+                    class: d.class, score: d.score,
+                    x: (d.bbox[0] + d.bbox[2]/2) / this.video.videoWidth,
+                    y: (d.bbox[1] + d.bbox[3]/2) / this.video.videoHeight,
+                    bbox: d.bbox
+                }));
+            }
+
+            stop() {
+                this.isRunning = false;
+                if (this.video.srcObject) this.video.srcObject.getTracks().forEach(t => t.stop());
+            }
+        }
+
+        // ============================================
+        // SCENE ANALYZER
+        // ============================================
+        class SceneAnalyzer {
+            constructor() {
+                this.video = document.getElementById('webcam');
+                this.canvas = document.createElement('canvas');
+                this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+                this.lastAnalysis = 0;
+                this.interval = 400;
+            }
+
+            analyze() {
+                const now = Date.now();
+                if (now - this.lastAnalysis < this.interval) return this.lastResult;
+                
+                this.canvas.width = 320;
+                this.canvas.height = 180;
+                this.ctx.drawImage(this.video, 0, 0, 320, 180);
+                
+                const data = this.ctx.getImageData(0, 0, 320, 180).data;
+                const colors = this.extractColors(data);
+                const dominant = colors[0] || { h: 0, s: 0, l: 0.5 };
+                
+                let bright = 0;
+                for (let i = 0; i < data.length; i += 4) {
+                    bright += (data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114);
+                }
+                
+                this.lastResult = { colors: colors.slice(0, 5), dominantColor: dominant, brightness: (bright / (data.length/4)) / 255, timestamp: now };
+                this.lastAnalysis = now;
+                return this.lastResult;
+            }
+
+            extractColors(pixels) {
+                const map = new Map();
+                for (let i = 0; i < pixels.length; i += 16) {
+                    const r = Math.round(pixels[i]/32)*32, g = Math.round(pixels[i+1]/32)*32, b = Math.round(pixels[i+2]/32)*32;
+                    const key = `${r},${g},${b}`;
+                    map.set(key, (map.get(key)||0)+1);
+                }
+                return Array.from(map.entries()).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([c])=>{
+                    const [r,g,b] = c.split(',').map(Number);
+                    return this.rgbToHsl(r,g,b);
+                });
+            }
+
+            rgbToHsl(r,g,b) {
+                r/=255; g/=255; b/=255;
+                const max=Math.max(r,g,b), min=Math.min(r,g,b);
+                let h,s,l=(max+min)/2;
+                if (max!==min) {
+                    const d=max-min;
+                    s=l>0.5?d/(2-max-min):d/(max+min);
+                    switch(max){case r:h=((g-b)/d+(g<b?6:0))/6;break;case g:h=((b-r)/d+2)/6;break;case b:h=((r-g)/d+4)/6;break;}
+                } else h=s=0;
+                return {h:h*360,s,l};
+            }
+        }
+
+        // ============================================
+        // MAIN APP
+        // ============================================
+        class App {
+            constructor() {
+                this.audio = new AudioEngine();
+                this.visualizer = new VisualEngine();
+                this.detector = new ObjectDetector();
+                this.analyzer = null;
+                this.isRunning = false;
+                this.fps = 0; this.lastFrame = 0; this.frameCount = 0;
+                this.recording = false;
+                this.setupUI();
+            }
+
+            setupUI() {
+                document.getElementById('start-btn').addEventListener('click', () => this.start());
+                document.getElementById('mute-btn').addEventListener('click', () => this.toggleMute());
+                document.getElementById('record-btn').addEventListener('click', () => this.toggleRecord());
+                document.getElementById('fullscreen-btn').addEventListener('click', () => this.toggleFullscreen());
+                document.getElementById('overlay').addEventListener('click', (e) => this.handleTap(e));
+            }
+
+            async start() {
+                const bar = document.getElementById('load-bar');
+                bar.style.width = '30%';
+                
+                try {
+                    await this.detector.loadModel();
+                    bar.style.width = '70%';
+                    await this.detector.start();
+                    bar.style.width = '90%';
+                    await this.audio.init();
+                    bar.style.width = '100%';
+                    
+                    this.analyzer = new SceneAnalyzer();
+                    
+                    setTimeout(() => {
+                        document.getElementById('loading-screen').classList.add('hidden');
+                        document.getElementById('start-screen').classList.add('hidden');
+                        document.getElementById('app').classList.add('active');
+                        setTimeout(() => {
+                            document.getElementById('tap-hint').style.display = 'block';
+                        }, 1500);
+                    }, 500);
+                    
+                    this.isRunning = true;
+                    this.loop();
+                    
+                } catch (err) {
+                    console.error(err);
+                    alert('Error: ' + err.message + '\n\nPlease allow camera access and use a modern browser.');
+                }
+            }
+
+            loop() {
+                if (!this.isRunning) return;
+                const now = performance.now();
+                this.frameCount++;
+                if (now - this.lastFrame >= 1000) {
+                    this.fps = this.frameCount;
+                    this.frameCount = 0;
+                    this.lastFrame = now;
+                    document.getElementById('fps-display').textContent = `${this.fps} FPS`;
+                }
+                
+                const sceneData = this.analyzer.analyze();
+                const detections = this.detector.getDetections();
+                
+                this.audio.updateFromScene({...sceneData, objects: detections});
+                this.visualizer.updateScene(sceneData.colors, detections, this.audio.getAudioParams());
+                this.updateUI(sceneData, detections);
+                
+                requestAnimationFrame(() => this.loop());
+            }
+
+            updateUI(sceneData, detections) {
+                const palette = document.getElementById('palette');
+                palette.innerHTML = '';
+                sceneData.colors.forEach(c => {
+                    const div = document.createElement('div');
+                    div.className = 'color-swatch';
+                    div.style.backgroundColor = `hsl(${c.h},${c.s*100}%,${c.l*100}%)`;
+                    palette.appendChild(div);
+                });
+                
+                const list = document.getElementById('obj-list');
+                list.innerHTML = '';
+                const unique = [...new Map(detections.map(d => [d.class, d])).values()];
+                unique.forEach(d => {
+                    const div = document.createElement('div');
+                    div.className = 'obj-item';
+                    div.innerHTML = `
+                        <div class="obj-icon">◉</div>
+                        <div class="obj-info">
+                            <div class="obj-name">${d.class}</div>
+                            <div class="obj-meta">${Math.round(d.score*100)}% confidence</div>
+                        </div>
+                        <div class="obj-confidence">${Math.round(d.score*100)}%</div>
+                    `;
+                    list.appendChild(div);
+                });
+                
+                document.getElementById('obj-count').textContent = `${detections.length} objects`;
+                
+                const p = this.audio.getAudioParams();
+                document.getElementById('drone-bar').style.width = `${p.drone}%`;
+                document.getElementById('drone-val').textContent = `${Math.round(p.drone)}%`;
+                document.getElementById('beat-bar').style.width = `${p.beat}%`;
+                document.getElementById('beat-val').textContent = `${Math.round(p.beat)}%`;
+                document.getElementById('mod-bar').style.width = `${p.mod}%`;
+                document.getElementById('mod-val').textContent = `${Math.round(p.mod)}%`;
+            }
+
+            handleTap(e) {
+                const rect = e.target.getBoundingClientRect();
+                const x = (e.clientX - rect.left) / rect.width;
+                const y = (e.clientY - rect.top) / rect.height;
+                
+                const detections = this.detector.getDetections();
+                let closest = null, closestDist = Infinity;
+                
+                detections.forEach(d => {
+                    const dist = Math.sqrt((d.x-x)**2 + (d.y-y)**2);
+                    if (dist < closestDist && dist < 0.15) { closestDist = dist; closest = d; }
+                });
+                
+                if (closest) {
+                    this.audio.triggerObjectSound(closest.class, closest.x);
+                    this.createRipple(e.clientX, e.clientY);
+                }
+            }
+
+            createRipple(x, y) {
+                const ripple = document.createElement('div');
+                ripple.className = 'ripple';
+                ripple.style.left = x + 'px';
+                ripple.style.top = y + 'px';
+                document.body.appendChild(ripple);
+                setTimeout(() => ripple.remove(), 800);
+            }
+
+            toggleMute() {
+                const muted = this.audio.toggleMute();
+                document.getElementById('mute-btn').textContent = muted ? '🔇' : '🔊';
+            }
+
+            async toggleRecord() {
+                const btn = document.getElementById('record-btn');
+                if (!this.recording) {
+                    this.audio.startRecording();
+                    this.recording = true;
+                    btn.classList.add('recording');
+                } else {
+                    const blob = await this.audio.stopRecording();
+                    this.recording = false;
+                    btn.classList.remove('recording');
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `ambient-lens-${Date.now()}.webm`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                }
+            }
+
+            toggleFullscreen() {
+                if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+                else document.exitFullscreen();
+            }
+        }
+
+        new App();
+    </script>
+</body>
+</html>
